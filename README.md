@@ -53,3 +53,7 @@ python bam_snapshots.py /path/to/main/directory
 
 `pysam` is used automatically if installed (faster, Mac/Linux); otherwise the
 pure-Python `bamnostic` is used, which needs no compiler and works on Windows.
+
+## License
+
+MIT — free to use, modify and distribute. See [LICENSE](LICENSE).
