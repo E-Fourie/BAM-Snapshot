@@ -1,14 +1,14 @@
 # BAM Snapshot
 
-Headless, cross-platform batch snapshots of BAM alignments. No IGV, no Java,
-no display needed — just Python and matplotlib. Runs the same on Windows,
-Mac and Linux.
+Headless, cross-platform batch snapshots of BAM alignments. No display or
+Java needed — just Python and matplotlib. Runs the same on Windows, Mac and
+Linux.
 
 ![example](docs/example.png)
 
-Each PNG shows a coverage track (bases differing from the reference in ≥20% of
-reads are coloured) above a packed read pileup: forward reads blue-grey,
-reverse reads pink, mismatches coloured by base, deletions as black bars,
+Each PNG shows a coverage track with a dashed 10x minimum-depth line (bases differing from the reference in ≥20% of
+reads are coloured) above a packed read pileup: reads as grey bars,
+mismatches coloured by base, deletions as black bars,
 insertions as purple ticks.
 
 ## Layout

@@ -2,7 +2,7 @@
 """
 bam_snapshots.py - headless, cross-platform BAM snapshot generator.
 
-Replaces the IGV-based shell/PowerShell scripts. Same folder layout:
+Expected folder layout:
 
     main_dir/
         sample1/
@@ -35,6 +35,11 @@ except ImportError:
     except ImportError:
         sys.exit("Need pysam or bamnostic:  pip install bamnostic")
 
+# Palette matches the PSBA plasmid report.
+INK, SUB, LINE = "#1c2b28", "#5b6b67", "#dcd9cd"
+ACCENT, ACCENT2, WARN = "#0a4f47", "#0f6e63", "#b5651d"
+READ_GREY = "#c4c9c6"
+MIN_DEPTH = 10
 BASE_COLOURS = {"A": "#2ca02c", "C": "#1f4fd8", "G": "#e08a00", "T": "#d62728", "N": "#888888"}
 M, I, D, N, S, H, P, EQ, X = range(9)  # BAM CIGAR op codes
 REF_CONSUMING = {M, D, N, EQ, X}
@@ -125,7 +130,9 @@ def render(bam_path, out_png, contig, ref, region, args):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.collections import PolyCollection
+    import matplotlib.font_manager
+    import matplotlib.ticker
+    from matplotlib.collections import LineCollection, PolyCollection
 
     start, end = region
     cov, counts, reads = analyse_bam(bam_path, contig, ref, start, end)
@@ -136,54 +143,66 @@ def render(bam_path, out_png, contig, ref, region, args):
     placed, n_rows = pack_rows(reads, args.max_rows)
     n_rows = max(n_rows, 1)
 
-    fig_h = 2.2 + n_rows * 0.09
+    plt.rcParams.update({
+        "font.family": [f for f in ("IBM Plex Sans", "Inter", "Segoe UI", "Helvetica Neue")
+                        if f in {x.name for x in matplotlib.font_manager.fontManager.ttflist}]
+                       or ["DejaVu Sans"],
+        "text.color": SUB, "axes.labelcolor": SUB,
+        "xtick.color": SUB, "ytick.color": SUB, "axes.edgecolor": LINE,
+    })
     fig, (axc, axr) = plt.subplots(
-        2, 1, figsize=(args.width, fig_h), sharex=True,
-        gridspec_kw={"height_ratios": [2.0, max(n_rows * 0.09, 0.5)], "hspace": 0.04})
+        2, 1, figsize=(args.width, 2.6 + n_rows * 0.09), sharex=True, facecolor="white",
+        gridspec_kw={"height_ratios": [2.0, max(n_rows * 0.09, 0.5)], "hspace": 0.06})
 
+    # Coverage: translucent teal area + solid line, light grid, dashed minimum-depth line.
     xs = np.arange(len(ref))
-    axc.fill_between(xs, cov, step="mid", color="#b8b8b8", linewidth=0)
+    axc.fill_between(xs, cov, step="mid", color=ACCENT2, alpha=0.22, linewidth=0)
+    axc.step(xs, cov, where="mid", color=ACCENT2, linewidth=1.5)
     total = np.maximum(cov, 1)
     for base, colour in BASE_COLOURS.items():
         if base == "N":
             continue
-        frac = counts[base] / total
-        mism = (frac >= 0.2) & (ref != base.encode()) & (cov > 0)
+        mism = (counts[base] / total >= 0.2) & (ref != base.encode()) & (cov > 0)
         if mism.any():
-            axc.vlines(xs[mism], 0, cov[mism], colors=colour, linewidth=1.2)
+            axc.vlines(xs[mism], 0, cov[mism], colors=colour, linewidth=1.4)
+    ymax = max(int(cov[start:end].max()) if end > start else 1, MIN_DEPTH * 2) * 1.08
     axc.set_xlim(start, end)
-    axc.set_ylim(0, max(int(cov[start:end].max()) if end > start else 1, 1) * 1.05)
-    axc.set_ylabel("Coverage")
-    axc.set_title(f"{Path(bam_path).name}   {contig}:{start + 1:,}-{end:,}   "
-                  f"{n_total:,} reads" + (f" ({len(placed):,} shown)" if len(placed) < n_total else ""),
-                  loc="left", fontsize=10)
+    axc.set_ylim(0, ymax)
+    axc.grid(axis="y", color=LINE, linewidth=1)
+    axc.set_axisbelow(True)
+    axc.axhline(MIN_DEPTH, color=WARN, linestyle=(0, (4, 4)), linewidth=1)
+    axc.text(end, MIN_DEPTH, f"{MIN_DEPTH}x (minimum we like to see)", color=WARN,
+             ha="right", va="bottom", fontsize=8)
+    axc.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{int(v)}x"))
+    axc.set_title(f"{Path(bam_path).name}   {contig}:{start + 1:,}-{end:,}   {n_total:,} reads"
+                  + (f" ({len(placed):,} shown)" if len(placed) < n_total else ""),
+                  loc="left", fontsize=10, color=ACCENT, fontweight="semibold")
 
-    fwd, rev, ticks, tcol, insx, dels = [], [], [], [], [], []
-    for row, (s, e, is_rev, mism, ins, dl) in placed:
-        y = row
-        poly = [(s, y + .1), (e, y + .1), (e, y + .9), (s, y + .9)]
-        (rev if is_rev else fwd).append(poly)
+    # Reads: grey bars; coloured marks are differences from the reference.
+    bars, ticks, tcol, dels, insx = [], [], [], [], []
+    for row, (s, e, _rev, mism, ins, dl) in placed:
+        bars.append([(s, row + .15), (e, row + .15), (e, row + .85), (s, row + .85)])
         for p, b in mism:
-            ticks.append([(p, y + .1), (p + 1, y + .1), (p + 1, y + .9), (p, y + .9)])
+            ticks.append([(p, row + .15), (p + 1, row + .15), (p + 1, row + .85), (p, row + .85)])
             tcol.append(BASE_COLOURS.get(b, "#888888"))
-        insx.extend((p, y) for p in ins)
-        dels.extend((a, b, y) for a, b in dl)
-    axr.add_collection(PolyCollection(fwd, facecolor="#cfd8e8", edgecolor="none"))
-    axr.add_collection(PolyCollection(rev, facecolor="#e8d0d0", edgecolor="none"))
-    for a, b, y in dels:  # deletion = black line through the read
-        axr.plot([a, b], [y + .5, y + .5], color="black", linewidth=1)
+        insx.extend((p, row + .5) for p in ins)
+        dels.extend(((a, row + .5), (b, row + .5)) for a, b in dl)
+    axr.add_collection(PolyCollection(bars, facecolor=READ_GREY, edgecolor="none"))
+    if dels:
+        axr.add_collection(LineCollection(dels, colors=INK, linewidths=1))
     if ticks:
         axr.add_collection(PolyCollection(ticks, facecolor=tcol, edgecolor=tcol, linewidth=0.4))
     if insx:
-        axr.scatter(*zip(*[(p, y + .5) for p, y in insx]), marker="|", s=40, color="#7a2fbf", linewidths=1.2)
+        axr.scatter(*zip(*insx), marker="|", s=40, color="#7a2fbf", linewidths=1.2)
     axr.set_ylim(n_rows, 0)
     axr.set_yticks([])
-    axr.set_xlabel(contig)
+    axr.set_xlabel(f"{contig} (bp)")
     axr.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{int(v):,}"))
     for ax in (axc, axr):
-        for sp in ("top", "right"):
+        for sp in ("top", "right", "left"):
             ax.spines[sp].set_visible(False)
-    fig.savefig(out_png, dpi=args.dpi, bbox_inches="tight")
+        ax.tick_params(length=0, labelsize=8.5)
+    fig.savefig(out_png, dpi=args.dpi, bbox_inches="tight", facecolor="white")
     plt.close(fig)
 
 
