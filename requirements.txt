@@ -1,5 +1,5 @@
 numpy
-matplotlib
+Pillow>=10.1
 bamnostic
 # optional, much faster on Mac/Linux:
 # pysam
