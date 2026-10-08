@@ -1,0 +1,5 @@
+numpy
+matplotlib
+bamnostic
+# optional, much faster on Mac/Linux:
+# pysam
